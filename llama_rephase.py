@@ -153,7 +153,7 @@ Examples:
                         help="Output JSON file for processed annotations")
     parser.add_argument("--model", "-m", type=str, default="meta-llama/Llama-3.2-3B-Instruct",
                         help="Model identifier to use")
-    parser.add_argument("--max_tokens", type=int, default=256,
+    parser.add_argument("--max_tokens", type=int, default=100,
                         help="Maximum tokens to generate")
     parser.add_argument("--target_tokens", type=int, default=77,
                         help="Target tokens for summary length")

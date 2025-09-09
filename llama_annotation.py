@@ -103,7 +103,7 @@ def main():
                         help="Batch size for processing images")
     parser.add_argument("--max_images", type=int, default=None,
                         help="Maximum number of images to process")
-    parser.add_argument("--max_tokens", type=int, default=150,
+    parser.add_argument("--max_tokens", type=int, default=200,
                         help="Maximum number of tokens to generate")
     parser.add_argument("--model_name", type=str, default="meta-llama/Llama-3.2-11B-Vision-Instruct",
                         help="Model name to use")
