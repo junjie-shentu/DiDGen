@@ -1,0 +1,8 @@
+[
+    {
+        "instance_prompt_json": "/home2/jvqx51/skin_lesion/skin_generation_v5/data/ISIC2018_task1_training_annotations_processed.json", 
+        "instance_data_dir": "/home2/jvqx51/skin_lesion/controlnet_skin_lesion/data/ISIC2018/ISIC2018_Task1-2_Training_Input", 
+        "segmask_dir": "/home2/jvqx51/skin_lesion/controlnet_skin_lesion/data/ISIC2018/ISIC2018_Task1_Training_GroundTruth",
+        "class_data_dir": "./data/class_image"
+    }
+]
