@@ -187,7 +187,7 @@ def parse_args():
         "--token_indices", 
         type=int, 
         nargs="+", 
-        default=[4],
+        default=[4, 6],
         help="Which token indices to alter with attend-and-excite"
     )
     

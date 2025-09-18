@@ -465,14 +465,7 @@ class Skindataset(torch.utils.data.Dataset):
             instance_prompt =  "An image of <lesion> on <skin>." + " " + instance_prompt
         example["input_ids"] = self.tokenizer(instance_prompt, max_length=self.tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt").input_ids
 
-        num_determiner_2 = random.random()
-        if num_determiner_2 < 1/2: # lesion
-            example["attention_mask"] = example["conditioning_pixel_values"]
-            example["modifier_token_mask"] = [1,0]
-        else: # skin
-            example["attention_mask"] = torch.ones_like(example["conditioning_pixel_values"]) - example["conditioning_pixel_values"]
-            example["modifier_token_mask"] = [0,1]
-
+        example["attention_mask"] = (example["conditioning_pixel_values"], torch.ones_like(example["conditioning_pixel_values"]) - example["conditioning_pixel_values"])
 
         if self.with_prior_preservation:
             class_image, class_prompt = self.class_images_path[idx % self.num_class_images]
@@ -489,7 +482,7 @@ def collate_fn(examples, with_prior_preservation=False):
     input_ids = [example["input_ids"] for example in examples]
     pixel_values = [example["pixel_values"] for example in examples]
     attention_mask = [example["attention_mask"] for example in examples]
-    modifier_token_mask = [example["modifier_token_mask"] for example in examples]
+
     
 
     if with_prior_preservation:
@@ -499,13 +492,11 @@ def collate_fn(examples, with_prior_preservation=False):
     input_ids = torch.cat(input_ids, dim=0)
     pixel_values = torch.stack(pixel_values)
     attention_mask = torch.stack(attention_mask)
-    modifier_token_mask = modifier_token_mask
 
     return {
         "pixel_values": pixel_values,
         "input_ids": input_ids,
         "attention_mask": attention_mask,
-        "modifier_token_mask": modifier_token_mask
     }
 
 
@@ -905,37 +896,15 @@ def main(args):
     first_epoch = 0
 
     from_where = ["up","down", "mid"]
-    res_list = [16]
-    self_res_list = [32]
+    cross_res = 16
 
-    def jensen_shannon_divergence(p, q, eps=1e-16):
-
-        # Softmax to make them probability distributions
-        p_probs = F.softmax(p.view(-1), dim=0).view(p.size())
-        q_probs = F.softmax(q.view(-1), dim=0).view(q.size())
-
-        # Calculate the average of the probabilities
-        m = 0.5 * (p_probs + q_probs)
-        
-        # Compute the Jensen-Shannon Divergence
-        js_divergence = 0.5 * (torch.sum(p_probs * torch.log(p_probs + eps)) + torch.sum(q_probs * torch.log(q_probs + eps)))
-        js_divergence -= torch.sum(m * torch.log(m + eps))
-    
-        return js_divergence
     
 
-    def get_attention_maps(prompts, modifier_token_mask ,bsz, GT_attention_maps):#calculate_cross_attn_loss, mask_token, GT_attention_maps):
-        
-        cross_attention_maps_1 = []
-        cross_attention_maps_res_1 = []
-        self_attention_maps_1 = []
-        self_attention_maps_res_1 = []
-        affinity_mat_1 = []
-        affinity_mat_res_1 = []
-        affinity_mat_multi_power_1 = []
-        affinity_mat_multi_power_res_1 = []
-        cross_attention_maps_1_power = []
-        cross_attention_maps_res_1_power = []
+    def get_attention_maps(prompts, bsz, GT_attention_maps):#calculate_cross_attn_loss, mask_token, GT_attention_maps):
+
+        attention_loss = 0.0
+        attn_losses = []
+
 
         if args.with_prior_preservation:
             num_samples_to_extract_attention = bsz  // 2
@@ -943,128 +912,35 @@ def main(args):
             num_samples_to_extract_attention = bsz
 
         for i in range(num_samples_to_extract_attention):
-            for res in res_list:
-                cross_attention_map = aggregate_current_attention(prompts=prompts,
-                                                                attention_store=controller, 
-                                                                res=res, 
-                                                                from_where=from_where,
-                                                                is_cross=True,
-                                                                select=i)
+            cross_attention_map = aggregate_current_attention(prompts=prompts,
+                                                            attention_store=controller, 
+                                                            res=cross_res, 
+                                                            from_where=from_where,
+                                                            is_cross=True,
+                                                            select=i)
 
-                target_indices = find_the_identify_token_index(prompts[i], modifier_token_id)[:2]
+            GT_attention_maps_i = GT_attention_maps[i]
+
+            target_indices = find_the_identify_token_index(prompts[i], modifier_token_id)[:2]
 
 
-                token_mask = modifier_token_mask[i]
-                target_indices = [target_indices[ind] for ind in range(len(target_indices)) if token_mask[ind] == 1]
-
-                assert len(target_indices) == 1, "In this scenario, we only consider one single modifier token per sample."
-
-                image_1 = cross_attention_map[:, :, target_indices]
-                image_1 = F.interpolate(image_1.unsqueeze(0).permute(0, 3, 1, 2), (32, 32), mode='bicubic', align_corners=False).permute(0, 2, 3, 1).squeeze(0)
+            for target_index in target_indices:
+                cross_image = cross_attention_map[:, :, target_index]
 
                 #normalization
                 # create a new tensor to hold the result of the computation instead of directly modifying the original tensor to avoid in-place operation error
-                image_1_normalized = torch.zeros_like(image_1)
-                for tar_ind in range(image_1.shape[2]):
-                    image_1_normalized[..., tar_ind] = (image_1[..., tar_ind] - torch.min(image_1[..., tar_ind])) / (torch.max(image_1[..., tar_ind]) - torch.min(image_1[..., tar_ind]))
-                image_1_power = torch.pow(image_1, 2)  
-                image_1_power_normalized = torch.zeros_like(image_1_power)
-                for tar_ind in range(image_1_power.shape[2]):
-                    image_1_power_normalized[..., tar_ind] = (image_1_power[..., tar_ind] - torch.min(image_1_power[..., tar_ind])) / (torch.max(image_1_power[..., tar_ind]) - torch.min(image_1_power[..., tar_ind]))
+                cross_image_normalized = torch.zeros_like(cross_image)
+                cross_image_normalized = (cross_image - torch.min(cross_image)) / (torch.max(cross_image) - torch.min(cross_image))
 
+                # Interpolate GT_attention_maps_i to match the size of cross_image (16x16)
+                GT_map = F.interpolate(GT_attention_maps_i[target_index].unsqueeze(0).unsqueeze(0), size=(16, 16), mode='bicubic', align_corners=False).squeeze(0).squeeze(0)
+                loss = torch.nn.functional.mse_loss(cross_image_normalized, GT_map)
+                attn_losses.append(loss)
 
-                # Since we create new tensors to hold the results of the computation, we need to append the new tensors to the list instad of the original tensors
-                cross_attention_maps_res_1.append(image_1_normalized)
-                cross_attention_maps_res_1_power.append(image_1_power_normalized)
+            attention_loss = torch.mean(torch.stack(attn_losses), dim=0)
 
-
-            cross_attention_maps_1.append(torch.stack(cross_attention_maps_res_1).mean(dim=0))
-            cross_attention_maps_1_power.append(torch.stack(cross_attention_maps_res_1_power).mean(dim=0))
-
-            cross_attention_maps_res_1 = []
-            cross_attention_maps_res_1_power = []
-
-            for self_res in self_res_list:
-                self_attention_map = aggregate_current_attention(prompts=prompts, #get the averaged self attention map from different layers (in same size) of the ith text in batch
-                                    attention_store=controller, 
-                                    res=self_res, 
-                                    from_where=from_where,
-                                    is_cross=False,
-                                    select=i)
-                
-                self_attention_map = F.interpolate(self_attention_map.unsqueeze(0).permute(0, 3, 1, 2), (32, 32), mode='bicubic', align_corners=False).permute(0, 2, 3, 1).squeeze(0)
-                self_attention_map = (self_attention_map - torch.min(self_attention_map)) / (torch.max(self_attention_map) - torch.min(self_attention_map))
-                affinity_mat = self_attention_map.reshape(32**2, 32**2)
-
-                affinity_mat_multi = torch.matrix_power(affinity_mat, 4)  #apply matrix multiplication for 4 times
-                affinity_mat_power = torch.pow(affinity_mat, 1)            #apply element-wise power for 2 times
-
-                affinity_mat_multi_power = affinity_mat_multi * affinity_mat_power # element-wise multiplication; could try using @ for matrix multiplication
-
-                affinity_mat_multi = (affinity_mat_multi - torch.min(affinity_mat_multi)) / (torch.max(affinity_mat_multi) - torch.min(affinity_mat_multi))
-                affinity_mat_multi_power = (affinity_mat_multi_power - torch.min(affinity_mat_multi_power)) / (torch.max(affinity_mat_multi_power) - torch.min(affinity_mat_multi_power))
-
-                self_attention_maps_res_1.append(affinity_mat)
-                affinity_mat_res_1.append(affinity_mat_multi)
-                affinity_mat_multi_power_res_1.append(affinity_mat_multi_power)
-
-            self_attention_maps_1.append(torch.stack(self_attention_maps_res_1).mean(dim=0))
-            affinity_mat_1.append(torch.stack(affinity_mat_res_1).mean(dim=0))
-            affinity_mat_multi_power_1.append(torch.stack(affinity_mat_multi_power_res_1).mean(dim=0))
-
-            self_attention_maps_res_1 = []
-            affinity_mat_res_1 = []
-            affinity_mat_multi_power_res_1 = []
-
-        cross_attention_maps_1 = torch.stack(cross_attention_maps_1).to("cuda")
-        cross_attention_maps_1_power = torch.stack(cross_attention_maps_1_power).to("cuda")
-
-        self_attention_maps_1 = torch.stack(self_attention_maps_1).to("cuda")
-        affinity_mat_1 = torch.stack(affinity_mat_1).to("cuda")
-        affinity_mat_multi_power_1 = torch.stack(affinity_mat_multi_power_1).to("cuda")
-
-        attention_loss = 0.0
-        attention_loss_list = []
-        if len(target_indices) == 1:
-            self_cross_attention_map_for_all_subjects = {"self_attention_maps": self_attention_maps_1, "cross_attention_maps": cross_attention_maps_1, "cross_attention_maps_power": cross_attention_maps_1_power, 
-                                                        "self_cross_attention_map": [], "self_cross_attention_map_self_power": [], "self_cross_attention_map_cross_power": [], "self_cross_attention_map_cross_power_self_power": [],
-                                                       }
-            
-            self_cross_attention_map = (affinity_mat_1 @ cross_attention_maps_1.reshape(-1, 32**2, 1)).reshape(-1, 32, 32)
-            self_cross_attention_map = (self_cross_attention_map - torch.min(self_cross_attention_map)) / (torch.max(self_cross_attention_map) - torch.min(self_cross_attention_map))
-            self_cross_attention_map_for_all_subjects["self_cross_attention_map"].append(self_cross_attention_map)
-
-            self_cross_attention_map_cross_power = (affinity_mat_1 @ cross_attention_maps_1_power.reshape(-1, 32**2, 1)).reshape(-1, 32, 32)
-            self_cross_attention_map_cross_power = (self_cross_attention_map_cross_power - torch.min(self_cross_attention_map_cross_power)) / (torch.max(self_cross_attention_map_cross_power) - torch.min(self_cross_attention_map_cross_power))
-            self_cross_attention_map_for_all_subjects["self_cross_attention_map_cross_power"].append(self_cross_attention_map_cross_power)
-
-            GT_attention_maps = F.interpolate(GT_attention_maps, (32, 32), mode='bicubic', align_corners=False).reshape(-1, 32, 32)
-
-
-            attn_loss = jensen_shannon_divergence(cross_attention_maps_1[..., 0], GT_attention_maps)
-            attention_loss_list.append(attn_loss)
-        
-        else:
-            raise ValueError("In this scenario, we only consider one single modifier token per sample.")
-        
-        attention_loss_1 = torch.mean(torch.stack(attention_loss_list), dim=0)
-        attention_loss = attention_loss_1
-
-        return target_indices, self_cross_attention_map_for_all_subjects, attention_loss
+        return attention_loss
     
-
-    def show_attention_maps(target_indices, attention_maps_1, self_cross_attention_map_for_all_subjects, global_step):
-        show_attention_map_during_training(cross_attention_map = attention_maps_1.squeeze(1), obj="ground_truth", global_step=global_step)
-        show_attention_map_during_training(cross_attention_map = self_cross_attention_map_for_all_subjects["self_attention_maps"], obj="self_attention_map", global_step=global_step)
-
-        if len(target_indices) == 1:
-            show_attention_map_during_training(cross_attention_map = self_cross_attention_map_for_all_subjects["cross_attention_maps"], obj=f"cross_attention", global_step=global_step)
-            show_attention_map_during_training(cross_attention_map = self_cross_attention_map_for_all_subjects["cross_attention_maps_power"], obj=f"cross_attention_power", global_step=global_step)
-            show_attention_map_during_training(cross_attention_map = self_cross_attention_map_for_all_subjects["self_cross_attention_map"][0], obj="self_cross_attention_map", global_step=global_step)
-            show_attention_map_during_training(cross_attention_map = self_cross_attention_map_for_all_subjects["self_cross_attention_map_cross_power"][0], obj="self_cross_attention_map_cross_power", global_step=global_step)
-
-        else:
-            raise ValueError("In this scenario, we only consider one single modifier token per sample.")
 
 
 
@@ -1115,13 +991,8 @@ def main(args):
             with accelerator.accumulate(unet):
 
                 attention_mask = batch["attention_mask"].to(dtype=weight_dtype)
-                attention_mask = (attention_mask - torch.min(attention_mask)) / (torch.max(attention_mask) - torch.min(attention_mask))
 
-                #transform attention_mask to binary mask
-                batch_max_masks = F.interpolate(attention_mask, size=(64, 64), mode='bicubic')
-                batch_max_masks = (batch_max_masks > 0.5).float()
 
-                modifier_token_mask = batch["modifier_token_mask"]
             
                 # Convert images to latent space
                 latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
@@ -1175,13 +1046,9 @@ def main(args):
                 else:
                     loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
-                target_indices, self_cross_attention_map_for_all_subjects, attention_loss = get_attention_maps(prompts = batch["input_ids"], 
-                                                                                                               modifier_token_mask = modifier_token_mask,
-                                                                                                                    bsz = bsz,
-                                                                                                                    GT_attention_maps = batch_max_masks)
-                
-                if global_step % 200 == 0:
-                    show_attention_maps(target_indices, batch_max_masks, self_cross_attention_map_for_all_subjects, global_step=global_step)
+                attention_loss = get_attention_maps(prompts = batch["input_ids"],
+                                                    bsz = bsz,
+                                                    GT_attention_maps = attention_mask)
 
                 wandb.log({"denoise_loss": loss}, step=global_step)
                 if args.with_prior_preservation:
@@ -1194,7 +1061,7 @@ def main(args):
                 controller.attention_store = controller.get_empty_store()
 
 
-                total_loss = loss + attention_loss
+                total_loss = loss + 0.1 * attention_loss
                 wandb.log({"total_loss": total_loss}, step=global_step)
 
                 accelerator.backward(total_loss)

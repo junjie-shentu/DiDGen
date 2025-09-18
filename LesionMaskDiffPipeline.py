@@ -170,11 +170,6 @@ class LesionMaskDiffPipeline(StableDiffusionPipeline):
 
         assert len(semantic_mask_cross) == len(indices_to_alter), "Number of semantic masks should match the number of indices to alter"
 
-        # Extract the maximum values
-        max_indices_list_fg = []
-        max_indices_list_bg = []
-        dist_x = []
-        dist_y = []
 
         loss_total = []
 
@@ -461,9 +456,9 @@ class LesionMaskDiffPipeline(StableDiffusionPipeline):
                                                 encoder_hidden_states=prompt_embeds[1].unsqueeze(0), cross_attention_kwargs=cross_attention_kwargs).sample
                     self.unet.zero_grad()
 
-                    region_loss, cross_attention_map_cur_step, self_attention_map_cur_step = self._aggregate_and_get_max_attention_per_token(
+                    region_loss_lesion, cross_attention_map_cur_step, self_attention_map_cur_step = self._aggregate_and_get_max_attention_per_token(
                         attention_store=attention_store,
-                        indices_to_alter=indices_to_alter,
+                        indices_to_alter=indices_to_alter[0],
                         attention_res=attention_res,
                         self_attention_res=self_attention_res,
                         prompts=text_inputs.input_ids,
@@ -472,6 +467,20 @@ class LesionMaskDiffPipeline(StableDiffusionPipeline):
                         semantic_mask_self=semantic_mask_self,
                         config=config,
                     )
+
+                    region_loss_skin, _, _ = self._aggregate_and_get_max_attention_per_token(
+                        attention_store=attention_store,
+                        indices_to_alter=indices_to_alter[0],
+                        attention_res=attention_res,
+                        self_attention_res=self_attention_res,
+                        prompts=text_inputs.input_ids,
+                        normalize_eot=sd_2_1,
+                        semantic_mask_cross=semantic_mask_cross,
+                        semantic_mask_self=semantic_mask_self,
+                        config=config,
+                    )
+
+                    region_loss = 0.5 * (region_loss_lesion + region_loss_skin)
 
                     if not run_standard_sd:
 
