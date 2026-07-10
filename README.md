@@ -1,6 +1,6 @@
 # DiDGen
 
-### This is the official PyTorch implementation for the paper DiDGen: Diffusion-based Dual-task Synthesis for Dermoscopic Data Generation.
+### This is the official PyTorch implementation for the MICCAI paper *DiDGen: Diffusion-based Dual-task Synthesis for Dermoscopic Data Generation*.
 
 ### Update: This work has been accepted by *Medical Image Analysis*, with a title *Controllable synthesis of dermoscopic images using diffusion models for enhanced computer aided diagnosis and detection*.
 
