@@ -45,3 +45,26 @@ bash generate_image_with_attention_map.sh
 ```
 bash generate_lesion_mask_pair.sh
 ```
+
+## Citation
+If you find this work helpful, please consider citing the following BibTeX entry:
+```
+@inproceedings{shentu2025didgen,
+  title={DiDGen: Diffusion-Based Dual-Task Synthesis for Dermoscopic Data Generation},
+  author={Shentu, Junjie and Watson, Matthew and Al Moubayed, Noura},
+  booktitle={International Conference on Medical Image Computing and Computer-Assisted Intervention},
+  pages={74--84},
+  year={2025},
+  organization={Springer}
+
+@article{SHENTU2026104191,
+title = {Controllable synthesis of dermoscopic images using diffusion models for enhanced computer aided diagnosis and detection},
+journal = {Medical Image Analysis},
+volume = {113},
+pages = {104191},
+year = {2026},
+issn = {1361-8415},
+doi = {https://doi.org/10.1016/j.media.2026.104191},
+author = {Junjie Shentu and Matthew Watson and Noura Al Moubayed}
+}
+```
