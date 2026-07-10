@@ -56,6 +56,7 @@ If you find this work helpful, please consider citing the following BibTeX entry
   pages={74--84},
   year={2025},
   organization={Springer}
+}
 
 @article{SHENTU2026104191,
 title = {Controllable synthesis of dermoscopic images using diffusion models for enhanced computer aided diagnosis and detection},
